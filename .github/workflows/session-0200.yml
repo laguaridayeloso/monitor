@@ -1,0 +1,93 @@
+name: AoE2CM Scanner - 02:00 UTC
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  scan-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          
+      - name: Install Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          
+      - name: Install ChromeDriver
+        run: |
+          CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1)
+          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
+          wget -q "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip"
+          unzip chromedriver_linux64.zip
+          sudo mv chromedriver /usr/local/bin/
+          chmod +x /usr/local/bin/chromedriver
+          chromedriver --version
+          
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium==4.15.0
+          pip install beautifulsoup4==4.12.2
+          pip install requests==2.31.0
+          
+      - name: Create scanner script
+        run: |
+          cat > scanner.py << 'EOF'
+          print("Bot scanner placeholder")
+          import json
+          try:
+              with open('data/matches.json', 'r') as f:
+                  matches = json.load(f)
+          except:
+              matches = {"matches": []}
+          print(f"Total matches in DB: {len(matches.get('matches', []))}")
+          EOF
+          
+      - name: Run AoE2CM Scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SESSION_TIME: "02:00"
+        run: |
+          python scanner.py
+          
+      - name: Commit and push if there are changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          if git diff --quiet data/matches.json; then
+            echo "No changes in matches.json"
+          else
+            echo "Changes detected, committing..."
+            git add data/matches.json
+            git commit -m "🤖 Update matches from 02:00 scan"
+            git push
+          fi
+          
+      - name: Report completion
+        if: always()
+        run: |
+          echo "✅ AoE2CM Scan completed at $(date)"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run ID: ${{ github.run_id }}"
